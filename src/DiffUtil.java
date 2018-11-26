@@ -11,7 +11,9 @@ import org.skyscreamer.jsonassert.JSONAssert;
 
 import java.io.*;
 import java.nio.file.Files;
+import java.nio.file.Path;
 import java.nio.file.Paths;
+import java.nio.file.StandardOpenOption;
 import java.util.*;
 import java.util.logging.Level;
 import java.util.logging.Logger;
@@ -25,17 +27,21 @@ public class DiffUtil {
     JSONArray masterList = new JSONArray();
 
     JSONArray childList = new JSONArray();
+    
     private static Configuration CONFIG;
 
     private static Logger logger = Configuration.getLogger(DiffUtil.class.getName());
-
+    
     private static HashMap<String, String> map = new HashMap();
-
+    
     private static List<String> report = new ArrayList();
-
+    
+    static int fileNo = 1;
+    
     public DiffUtil() {
         CONFIG = Configuration.loadConfiguration();
     }
+    
 
     public void init() throws IOException {
         if (CONFIG.COMPARE_RESPONSE) {
@@ -185,6 +191,28 @@ public class DiffUtil {
         System.out.println("Files in Master : " + masterList.length());
         System.out.println("Files in Child  : " + childList.length());
     }
+    
+    private void diffFilesWrite(String key) throws Exception{
+    	Files.write(Paths.get(CONFIG.ROOT + File.separator + "diff" + File.separator + "fileList.txt"), key.getBytes() , StandardOpenOption.APPEND);
+    	Files.write(Paths.get(CONFIG.ROOT + File.separator + "diff" + File.separator + "fileList.txt"), System.lineSeparator().getBytes() , StandardOpenOption.APPEND);
+    }
+    
+	private void diffHtml(StringBuilder reportBuilder, int fileNo) throws Exception{
+		StringBuilder htmlBuilder = new StringBuilder();
+		String fileName = CONFIG.ROOT + File.separator + "diff" + fileNo + ".html";
+        htmlBuilder.append("<html><head><script src=\"https://ajax.googleapis.com/ajax/libs/jquery/3.3.1/jquery.min.js\"></script></head><style>.master td{background-color:#cce5cc;vertical-align:top;} .child td{background-color:#ffe5e5;vertical-align:top} table{border: 2px solid #ddd;}</style>");
+        htmlBuilder.append("<script>function showLink(ele){ if (ele.parentElement.nextElementSibling.style.display === 'none') {ele.parentElement.nextElementSibling.style.display = 'block'; ele.textContent = 'hide url'} else {ele.parentElement.nextElementSibling.style.display = 'none'; ele.textContent = 'show url'}}</script><body>");
+        htmlBuilder.append("<script src=\"count.js\"></script>");
+        htmlBuilder.append(reportBuilder);
+        htmlBuilder.append("</body></html>");
+        try {
+        new File(fileName).createNewFile();
+        Files.write(Paths.get(fileName), htmlBuilder.toString().getBytes(), StandardOpenOption.TRUNCATE_EXISTING);
+        } catch (Exception e){
+        	e.printStackTrace();
+        }
+	}
+    
 
     /**
      * Compares html and json files loaded in master and child list.
@@ -192,12 +220,25 @@ public class DiffUtil {
      * @throws IOException
      */
     private void compareFiles() throws IOException {
-        Properties diffFiles = new Properties();
-        StringBuilder reportBuilder = new StringBuilder();
-        reportBuilder.append("<html><head><script src=\"https://ajax.googleapis.com/ajax/libs/jquery/3.3.1/jquery.min.js\"></script></head><style>.master td{background-color:#cce5cc;vertical-align:top;} .child td{background-color:#ffe5e5;vertical-align:top} table{border: 2px solid #ddd;}</style>");
-        reportBuilder.append("<script>function showLink(ele){ if (ele.parentElement.nextElementSibling.style.display === 'none') {ele.parentElement.nextElementSibling.style.display = 'block'; ele.textContent = 'hide url'} else {ele.parentElement.nextElementSibling.style.display = 'none'; ele.textContent = 'show url'}}</script><body>");
+        
+    	Path diffFileListPath = Paths.get(CONFIG.ROOT + File.separator + "diff" + File.separator + "fileList.txt");
+    	try {
+            new File(CONFIG.ROOT + File.separator + "diff").mkdirs();
+            new File(CONFIG.ROOT + File.separator + "diff" + File.separator + "fileList.txt").createNewFile();
+            Files.write(diffFileListPath, System.lineSeparator().getBytes() , StandardOpenOption.TRUNCATE_EXISTING);
+            new File(CONFIG.ROOT + File.separator + "count.js").createNewFile();
+            //Files.write(Paths.get(CONFIG.ROOT + File.separator + "count.js"), System.lineSeparator().getBytes() , StandardOpenOption.TRUNCATE_EXISTING);
+        } catch (Exception ex) {
+            ex.printStackTrace();
+        }
+    	StringBuilder reportBuilder = new StringBuilder();
+    	
         try (ProgressBar pb = new ProgressBar("Comparing responses", masterList.length(), ProgressBarStyle.ASCII)) {
             for (int iter = 0; iter < masterList.length();iter++) {
+            	if(Files.lines(diffFileListPath).count() == (fileNo * 100)){
+            		reportBuilder = new StringBuilder();
+            		fileNo++;
+            	}
                 pb.step();
                 String key = (String) masterList.getJSONObject(iter).get("File Name");
                 String masterFile = CONFIG.ROOT + File.separator + "master" + File.separator + key;
@@ -207,31 +248,21 @@ public class DiffUtil {
                     fileDiff(reportBuilder, builder, masterFile, childFile, key,masterList.getJSONObject(iter));
                 } else if (key.endsWith("json")) {
                     jsonDiff(reportBuilder, builder, masterFile, childFile, key,masterList.getJSONObject(iter));
-                }
+                }                
+
+
+                try {
+						getKeyCount();
+					} catch (Exception e) {
+						e.printStackTrace();
+				}     
+
+
+
             }
+
         }
 
-        try {
-            new File(CONFIG.ROOT + File.separator + "diff").mkdirs();
-            new File(CONFIG.ROOT + File.separator + "diff" + File.separator + "fileList.properties").createNewFile();
-            FileOutputStream localOut = new FileOutputStream(CONFIG.ROOT + File.separator + "diff" + File.separator + "fileList.properties"); // No I18N
-            diffFiles.store(localOut, "Files with Diff");
-        } catch (Exception ex) {
-            ex.printStackTrace();
-        }
-        reportBuilder.append("</body><script>$(document).ready(function(){");
-
-        for(Object o : report){
-            getKeyCount(reportBuilder,o);
-        }
-        reportBuilder.append("});</script></html>");
-        try {
-            FileWriter writer = new FileWriter(CONFIG.ROOT + File.separator + "diff.html");
-            writer.write(reportBuilder.toString());
-            writer.close();
-        } catch (Exception ex) {
-            ex.printStackTrace();
-        }
     }
 
     private void jsonDiff(StringBuilder reportBuilder, StringBuilder builder, String masterFile, String childFile, String key,JSONObject masterObj) {
@@ -242,31 +273,33 @@ public class DiffUtil {
             JSONAssert.assertEquals(childContent, masterContent, false);
         } catch (AssertionError e) {
             if (masterContent != null && childContent != null) {
-                diffString.append(masterContent).append(childContent);
-                if(!map.containsValue(diffString.toString())){
-                    reportBuilder.append("<h2>").append(key).append(" [<a href='javascript:void(0)' onclick='showLink(this)'>show url</a>]</h2><span style='display:none;word-wrap:break-word'>").append(masterObj.get("Operation")).append("##").append(masterObj.get("Login Name")).append("##").append(masterObj.get("URL")).append("</span>");
-                    reportBuilder.append("<p id='").append(key.substring(0, key.indexOf('.'))).append("'></p>");
-                reportBuilder.append("<table cellspacing='0' cellpadding='5'>");
-
-                builder.append("Master : ").append(masterContent);
-                builder.append("Build  : ").append(childContent);
-                builder.append("********");
-
-                reportBuilder.append("<tr class='master'><td>").append(1).append("</td><td>").append(masterContent.replaceAll("<", "&lt;").trim()).append("</td></tr>");
-                reportBuilder.append("<tr class='child'><td>").append(1).append("</td><td>").append(childContent.replaceAll("<", "&lt;").trim()).append("</td></tr>");
-
-                reportBuilder.append("<tr><td colspan=2>&nbsp;</td></tr>");
-                reportBuilder.append("</table><br><br>");
-
-                }
-                else{
-                    if(!report.contains(diffString.toString())){
-                        report.add(diffString.toString());
-                    }
-                }
-                map.put(key, diffString.toString());
-
+            	diffString.append(masterContent).append(childContent);
+            	if(!map.containsValue(diffString.toString())){
+	                reportBuilder.append("<h2>").append(key).append(" [<a href='javascript:void(0)' onclick='showLink(this)'>show url</a>]</h2><span style='display:none;word-wrap:break-word'>").append(masterObj.get("Operation")).append("##").append(masterObj.get("Login Name")).append("##").append(masterObj.get("URL")).append("</span>");
+	                reportBuilder.append("<p id='").append(key.substring(0, key.indexOf('.'))).append("'></p>");
+	                reportBuilder.append("<table cellspacing='0' cellpadding='5'>");
+	
+	                builder.append("Master : ").append(masterContent);
+	                builder.append("Build  : ").append(childContent);
+	                builder.append("********");
+	
+	                reportBuilder.append("<tr class='master'><td>").append(1).append("</td><td>").append(masterContent.replaceAll("<", "&lt;").trim()).append("</td></tr>");
+	                reportBuilder.append("<tr class='child'><td>").append(1).append("</td><td>").append(childContent.replaceAll("<", "&lt;").trim()).append("</td></tr>");
+	              
+	                reportBuilder.append("<tr><td colspan=2>&nbsp;</td></tr>");
+	                reportBuilder.append("</table><br><br>");
+	                
+            	}
+            	else{
+            		if(!report.contains(diffString.toString())){
+        				report.add(diffString.toString());
+        			}
+            	}
+            	map.put(key, diffString.toString());
+            	
                 try {
+                	diffFilesWrite(key);
+                	diffHtml(reportBuilder, fileNo);
                     new File(CONFIG.ROOT + File.separator + "diff").mkdirs();
                     new File(CONFIG.ROOT + File.separator + "diff" + File.separator + key).createNewFile();
                     FileWriter writer = new FileWriter(CONFIG.ROOT + File.separator + "diff" + File.separator + key);
@@ -282,7 +315,7 @@ public class DiffUtil {
         }
     }
 
-    private void fileDiff(StringBuilder reportBuilder,StringBuilder builder, String masterFile, String childFile, String key,JSONObject masterObj) {
+    private void fileDiff(StringBuilder reportBuilder, StringBuilder builder, String masterFile, String childFile, String key,JSONObject masterObj) {
         List<String> original = fileToLines(masterFile);
         List<String> revised = fileToLines(childFile);
         Patch patch = DiffUtils.diff(original, revised);
@@ -291,37 +324,40 @@ public class DiffUtil {
             Map<Character, Integer> masterFreqencyMap = getFrequencyMap(getFileContent(masterFile));
             Map<Character, Integer> childFrequencyMap = getFrequencyMap(getFileContent(childFile));
             if (!masterFreqencyMap.equals(childFrequencyMap)) {
-                StringBuilder test = new StringBuilder();
-                for (Object delta : patch.getDeltas()) {
+
+            	for (Object delta : patch.getDeltas()) {
                     Delta<String> del = (Delta<String>) delta;
-                    test.append(del.getOriginal().getLines().toString()).append(del.getRevised().getLines().toString());
-                }
-                diffString.append(test);
-                if(!map.containsValue(diffString.toString())){
-                    reportBuilder.append("<h2>").append(key).append(" [<a href='javascript:void(0)' onclick='showLink(this)'>show url</a>]</h2><span style='display:none;word-wrap:break-word'>").append(masterObj.get("Operation")).append("##").append(masterObj.get("Login Name")).append("##").append(masterObj.get("URL")).append("</span>");
-                    reportBuilder.append("<p id='").append(key.substring(0, key.indexOf('.'))).append("'></p>");
-                reportBuilder.append("<table cellspacing='0' cellpadding='5'>");
-                for (Object delta : patch.getDeltas()) {
-                    Delta<String> del = (Delta<String>) delta;
-                    builder.append("Master : ").append(del.getOriginal().toString().replaceAll("<", "&lt;").trim());
-                    builder.append("Build  : ").append(del.getRevised().toString().replaceAll("<", "&lt;").trim());
-                    builder.append("********");
+                    diffString.append(del.getOriginal().getLines().toString()).append(" ").append(del.getRevised().getLines().toString());                    
+            	}
 
-                    reportBuilder.append("<tr class='master'><td>").append(del.getOriginal().getPosition() + 1).append("</td><td>").append(del.getOriginal().getLines().toString().replaceAll("<", "&lt;").trim()).append("</td></tr>");
-                    reportBuilder.append("<tr class='child'><td>").append(del.getRevised().getPosition() + 1).append("</td><td>").append(del.getRevised().getLines().toString().replaceAll("<", "&lt;").trim()).append("</td></tr>");
-
-                    reportBuilder.append("<tr><td colspan=2>&nbsp;</td></tr>");
+            	if(!map.containsValue(diffString.toString())){
+            		reportBuilder.append("<h2>").append(key).append(" [<a href='javascript:void(0)' onclick='showLink(this)'>show url</a>]</h2><span style='display:none;word-wrap:break-word'>").append(masterObj.get("Operation")).append("##").append(masterObj.get("Login Name")).append("##").append(masterObj.get("URL")).append("</span>");
+            		reportBuilder.append("<p id='").append(key.substring(0, key.indexOf('.'))).append("'></p>");
+            		reportBuilder.append("<table cellspacing='0' cellpadding='5'>");
+	                for (Object delta : patch.getDeltas()) {
+	                    Delta<String> del = (Delta<String>) delta;
+	                    builder.append("Master : ").append(del.getOriginal().toString().replaceAll("<", "&lt;").trim());
+	                    builder.append("Build  : ").append(del.getRevised().toString().replaceAll("<", "&lt;").trim());
+	                    builder.append("********");
+	
+	                    reportBuilder.append("<tr class='master'><td>").append(del.getOriginal().getPosition() + 1).append("</td><td>").append(del.getOriginal().getLines().toString().replaceAll("<", "&lt;").trim()).append("</td></tr>");
+	                    reportBuilder.append("<tr class='child'><td>").append(del.getRevised().getPosition() + 1).append("</td><td>").append(del.getRevised().getLines().toString().replaceAll("<", "&lt;").trim()).append("</td></tr>");
+	                    
+	                    reportBuilder.append("<tr><td colspan=2>&nbsp;</td></tr>");
+	                }
+	                reportBuilder.append("</table><br><br>");
                 }
-                reportBuilder.append("</table><br><br>");
-                }
-                else {
-                    if(!report.contains(diffString.toString())){
-                        report.add(diffString.toString());
-                    }
-                }
-                map.put(key, diffString.toString());
-
+            	else {
+            		if(!report.contains(diffString.toString())){
+        				report.add(diffString.toString());
+        			}
+            	}
+            	map.put(key, diffString.toString());
+            	
+            	
                 try {
+                	diffFilesWrite(key);
+                	diffHtml(reportBuilder, fileNo);
                     new File(CONFIG.ROOT + File.separator + "diff").mkdirs();
                     new File(CONFIG.ROOT + File.separator + "diff" + File.separator + key).createNewFile();
                     FileWriter writer = new FileWriter(CONFIG.ROOT + File.separator + "diff" + File.separator + key);
@@ -331,26 +367,37 @@ public class DiffUtil {
                 } catch (Exception ex) {
                     ex.printStackTrace();
                 }
-            }}
+            }
+            }
     }
-
-    private void getKeyCount(StringBuilder reportBuilder,Object value){
+    
+    private void getKeyCount() throws Exception{
         Set<String> ref = map.keySet();
         Iterator<String> it = ref.iterator();
-        List<String> list = new ArrayList();
+        List<String> list;
+        StringBuffer reportBuilder = new StringBuffer();;
 
-        while (it.hasNext()) {
-            String o = it.next();
-            if(map.get(o).equals(value)) {
-                list.add(o);
-            }
+        for(Object value: report) {
+        	list = new ArrayList();
+        	reportBuilder = new StringBuffer();
+	        while (it.hasNext()) {
+	        	String o = it.next(); 
+	        	if(map.get(o).equals(value)) { 
+	        		list.add(o); 
+	        	} 
+	        } 
+	        if(!list.isEmpty()){
+	        	reportBuilder.append("$(\"#").append(list.get(0).substring(0, list.get(0).indexOf('.'))).append("\").append(\"Repeated: ").append(list.size()).append(" times\");").append(System.lineSeparator());
+	        }
         }
-        if(!list.isEmpty()){
-            repeatReport(reportBuilder,list.get(0),list.size());
-        }
-    }
-    private void repeatReport(StringBuilder reportBuilder,String url,Integer count){
-        reportBuilder.append("$(\"#").append(url, 0, url.indexOf('.')).append("\").append(\"Repeated: ").append(count).append(" times\");");
+        repeatCountScript(reportBuilder);
+     }
+    private void repeatCountScript(StringBuffer count) throws Exception{
+    	StringBuffer reportBuilder = new StringBuffer();
+    	reportBuilder.append("$(document).ready(function(){");
+    	reportBuilder.append(count);
+        reportBuilder.append("});");
+        Files.write(Paths.get(CONFIG.ROOT + File.separator + "count.js"), reportBuilder.toString().getBytes() , StandardOpenOption.TRUNCATE_EXISTING);
     }
     /**
      * Maps the characters and its frequency of occurrence in the given content
