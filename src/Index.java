@@ -80,7 +80,7 @@ public class Index {
     private static HttpClientContext httpContext;
 
     private static Map<String, CookieStore> userToCookieMap = new HashMap<String, CookieStore>();
-    private static int count = 1;
+    private static Integer count = 1;
     private static int retrycount = 1;
     private static String BUILD_TYPE = null;
     private static Configuration CONFIG = Configuration.loadConfiguration();
@@ -153,6 +153,7 @@ public class Index {
 
         if (CONFIG.PERSIST_SQL_FILES) {
             System.out.println("Taking Backup...");
+
             logger.log(Level.INFO, os);
 
             new File(CONFIG.BUILD_HOME + File.separator + "bin" + File.separator + "backUpData" + fileExtension).setExecutable(true);
@@ -206,6 +207,7 @@ public class Index {
         FileReader fr = new FileReader(new File(CONFIG.URL_FILE));
         BufferedReader br = new BufferedReader(fr);
         String line;
+        Long nanoTime = 0L;
         JSONArray urlList = new JSONArray();
         long lineCount = Files.lines(Paths.get(CONFIG.URL_FILE)).count();
         try (ProgressBar pb = new ProgressBar("Executing URL's", lineCount, ProgressBarStyle.ASCII)) {
@@ -232,9 +234,25 @@ public class Index {
                             } catch (Exception ignored) {
                             }
                             url = line.split("###")[3];
+                            String countVal = null;
+                            if(url.contains("?")){
+                            	countVal = "&urlautomationcount=".concat(count.toString());
+                            }
+                            else{
+                            	countVal = "?urlautomationcount=".concat(count.toString());
+                            }
+                            url = url.concat(countVal);
                         }
                         else {
                             url = line.split("###")[2];
+                            String countVal = null;
+                            if(url.contains("?")){
+                            	countVal = "&urlautomationcount=".concat(count.toString());
+                            }
+                            else{
+                            	countVal = "?urlautomationcount=".concat(count.toString());
+                            }
+                            url = url.concat(countVal);
                         }
 
 
@@ -259,30 +277,31 @@ public class Index {
                         try {
                             switch (operation) {
                                 case "GET":
-                                    get(loginName, url, portalId);
+                                    nanoTime = get(loginName, url, portalId);
                                     break;
                                 case "POST":
-                                    post(loginName, url, portalId);
+                                    nanoTime = post(loginName, url, portalId);
                                     break;
                                 case "PUT":
-                                    put(loginName, url, portalId);
+                                    nanoTime = put(loginName, url, portalId);
                                     break;
                                 case "DELETE":
-                                    delete(loginName, url, portalId);
+                                    nanoTime = delete(loginName, url, portalId);
                                     break;
                                 case "MULTIPART":
-                                    multipart(loginName, url, portalId);
+                                    nanoTime = multipart(loginName, url, portalId);
                                     break;
                                 case "JSONPOST":
-                                    jsonpost(loginName, url, portalId);
+                                    nanoTime = jsonpost(loginName, url, portalId);
                                     break;
                                 case "JSONPUT":
-                                    jsonput(loginName, url, portalId);
-                                    break;
+                                    nanoTime = jsonput(loginName, url, portalId);
+                                	break;
                             }
                         } catch (Exception e){
                             logger.log(Level.SEVERE, e.getMessage(), e);
                         }
+                        urlObj.put("Index", (urlList.length()+1));
                         urlObj.put("File Name", fileName);
                         urlObj.put("Login Name", loginName);
                         urlObj.put("Operation", operation);
@@ -290,6 +309,7 @@ public class Index {
                             urlObj.put("Portal Id", portalId);
                         }
                         urlObj.put("URL", url);
+                        urlObj.put("Time", nanoTime);
                         urlList.put(urlObj);
                     }
                     //diffurls.append(line).append(System.lineSeparator());
@@ -303,14 +323,16 @@ public class Index {
         Files.write(Paths.get(CONFIG.OUTPUT_DIR + File.separator + "fileList.json"), urlList.toString().getBytes());
     }
 
-    private static void multipart(String loginName, String url, Long portalId) throws IOException {
+    private static Long multipart(String loginName, String url, Long portalId) throws IOException {
         String queryString = url.split("\\?").length > 1 ? url.split("\\?", 2)[1] : "";
         HttpPost postReq = new HttpPost(CONFIG.PROTOCOL + CONFIG.HOST + ":" + CONFIG.PORT + url.split("\\?")[0]);
         queryString = handleCSRF(queryString);
         HttpEntity entity = getMultiPartEntity(queryString);
         httpContext = (HttpClientContext) getHttpContext(loginName, portalId);
         postReq.setEntity(entity);
+        Long initTime = System.currentTimeMillis();
         HttpResponse res = httpClient.execute(postReq, httpContext);
+        Long respTime = System.currentTimeMillis();
         Boolean isSuccess = writeResponse(res, loginName);
         if (!isSuccess) {
             retrycount++;
@@ -318,6 +340,7 @@ public class Index {
             multipart(loginName, url, portalId);
         }
         postReq.releaseConnection();
+        return (respTime-initTime);
     }
 
     private static HttpEntity getMultiPartEntity(String queryString) {
@@ -377,9 +400,11 @@ public class Index {
      * @throws IOException
      * @throws URISyntaxException
      */
-    private static void get(String loginName, String url, Long portalId) throws IOException, URISyntaxException {
+    private static Long get(String loginName, String url, Long portalId) throws IOException, URISyntaxException {
         HttpGet getReq = new HttpGet(getEncodedURL(url));
+        Long initTime = System.currentTimeMillis();
         HttpResponse res = httpClient.execute(getReq, getHttpContext(loginName, portalId));
+        Long respTime = System.currentTimeMillis();
         Boolean isSuccess = writeResponse(res, loginName);
         if (!isSuccess) {
             retrycount++;
@@ -387,6 +412,7 @@ public class Index {
             get(loginName, url, portalId);
         }
         getReq.releaseConnection();
+        return (respTime-initTime);
     }
 
     /**
@@ -395,14 +421,16 @@ public class Index {
      * @throws IOException
      * @throws URISyntaxException
      */
-    private static void post(String loginName, String url, Long portalId) throws IOException {
+    private static Long post(String loginName, String url, Long portalId) throws IOException {
         String queryString = url.split("\\?").length > 1 ? url.split("\\?", 2)[1] : "";
         HttpPost postReq = new HttpPost(CONFIG.PROTOCOL + CONFIG.HOST + ":" + CONFIG.PORT + url.split("\\?")[0]);
             postReq.setHeader("Content-Type", "application/x-www-form-urlencoded");
         httpContext = (HttpClientContext) getHttpContext(loginName, portalId);
         queryString = handleCSRF(queryString);
         postReq.setEntity(new StringEntity(queryString, "UTF-8"));
+        Long initTime = System.currentTimeMillis();
         HttpResponse res = httpClient.execute(postReq, httpContext);
+        Long respTime = System.currentTimeMillis();
         Boolean isSuccess = writeResponse(res, loginName);
         if (!isSuccess) {
             retrycount++;
@@ -410,6 +438,7 @@ public class Index {
             post(loginName, url, portalId);
         }
         postReq.releaseConnection();
+        return (respTime-initTime);
 
     }
 
@@ -419,7 +448,7 @@ public class Index {
      * @throws IOException
      * @throws URISyntaxException
      */
-    private static void jsonpost(String loginName, String url, Long portalId) throws IOException, URISyntaxException {
+    private static Long jsonpost(String loginName, String url, Long portalId) throws IOException, URISyntaxException {
         String queryString = url.split("\\?").length > 1 ? url.split("\\?", 2)[1] : "";
         String jsonParams = queryString.split("JSONPARAMETERS#",2)[1];
         queryString = queryString.split("JSONPARAMETERS#",2)[0];
@@ -428,7 +457,9 @@ public class Index {
         postReq.setHeader("Content-Type", "application/json");
         httpContext = (HttpClientContext) getHttpContext(loginName, portalId);
         postReq.setEntity(new StringEntity(jsonParams, ContentType.APPLICATION_JSON));
+        Long initTime = System.currentTimeMillis();
         HttpResponse res = httpClient.execute(postReq, httpContext);
+        Long respTime = System.currentTimeMillis();
         Boolean isSuccess = writeResponse(res, loginName);
         if (!isSuccess) {
             retrycount++;
@@ -436,6 +467,7 @@ public class Index {
             jsonpost(loginName, url, portalId);
         }
         postReq.releaseConnection();
+        return (respTime-initTime);
 
     }
 
@@ -445,14 +477,16 @@ public class Index {
      * @throws IOException
      * @throws URISyntaxException
      */
-    private static void put(String loginName, String url, Long portalId) throws IOException, URISyntaxException {
+    private static Long put(String loginName, String url, Long portalId) throws IOException, URISyntaxException {
         String queryString = url.split("\\?").length > 1 ? url.split("\\?")[1] : "";
         HttpPut httpPut = new HttpPut(CONFIG.PROTOCOL + CONFIG.HOST + ":" + CONFIG.PORT + url.split("\\?")[0]);
         httpPut.setHeader("Content-Type", "application/x-www-form-urlencoded");
         httpContext = (HttpClientContext) getHttpContext(loginName, portalId);
         queryString = handleCSRF(queryString);
         httpPut.setEntity(new StringEntity(queryString));
+        Long initTime = System.currentTimeMillis();
         HttpResponse res = httpClient.execute(httpPut, httpContext);
+        Long respTime = System.currentTimeMillis();
         Boolean isSuccess = writeResponse(res, loginName);
         if (!isSuccess) {
             retrycount++;
@@ -460,7 +494,7 @@ public class Index {
             put(loginName, url, portalId);
         }
         httpPut.releaseConnection();
-
+ 	    return (respTime-initTime);
     }
 
     /**
@@ -469,7 +503,7 @@ public class Index {
      * @throws IOException
      * @throws URISyntaxException
      */
-    private static void jsonput(String loginName, String url, Long portalId) throws IOException {
+    private static Long jsonput(String loginName, String url, Long portalId) throws IOException {
         String queryString = url.split("\\?").length > 1 ? url.split("\\?")[1] : "";
         String jsonParams = queryString.split("JSONPARAMETERS#",2)[1];
         queryString = queryString.split("JSONPARAMETERS#",2)[0];
@@ -478,7 +512,9 @@ public class Index {
         httpPut.setHeader("Content-Type", "application/json");
         httpContext = (HttpClientContext) getHttpContext(loginName, portalId);
         httpPut.setEntity(new StringEntity(jsonParams, ContentType.APPLICATION_JSON));
+        Long initTime = System.currentTimeMillis();
         HttpResponse res = httpClient.execute(httpPut, httpContext);
+        Long respTime = System.currentTimeMillis();
         Boolean isSuccess = writeResponse(res, loginName);
         if (!isSuccess) {
             retrycount++;
@@ -486,7 +522,7 @@ public class Index {
             jsonput(loginName, url, portalId);
         }
         httpPut.releaseConnection();
-
+        return (respTime-initTime);
     }
 
     /**
@@ -495,10 +531,13 @@ public class Index {
      * @throws IOException
      * @throws URISyntaxException
      */
-    private static void delete(String loginName, String url, Long portalId) throws IOException, URISyntaxException {
+    private static Long delete(String loginName, String url, Long portalId) throws IOException, URISyntaxException {
         HttpDelete httpDelete = new HttpDelete(getEncodedURL(url));
+        Long initTime=0L,respTime=0L;
         try {
+        	initTime = System.currentTimeMillis();
             HttpResponse res = httpClient.execute(httpDelete, getHttpContext(loginName, portalId));
+            respTime = System.currentTimeMillis();
             Boolean isSuccess = writeResponse(res, loginName);
             if (!isSuccess) {
                 retrycount++;
@@ -510,6 +549,7 @@ public class Index {
         } finally {
             httpDelete.releaseConnection();
         }
+        return (respTime-initTime);
     }
 
     /**
@@ -604,6 +644,7 @@ public class Index {
             }
 
             Files.write(Paths.get(CONFIG.OUTPUT_DIR + File.separator + fileName), content.getBytes());
+
         }
         return true;
     }
@@ -646,6 +687,7 @@ public class Index {
                 cookieStore.addCookie(cookie);
             }
             httpContext.setCookieStore(cookieStore);
+
 
         } catch (Exception e) {
             logger.log(Level.SEVERE, e.getMessage(), e);
