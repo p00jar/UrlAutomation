@@ -249,16 +249,11 @@ public class DiffUtil {
                 } else if (key.endsWith("json")) {
                     jsonDiff(reportBuilder, builder, masterFile, childFile, key,masterList.getJSONObject(iter));
                 }                
-
-
                 try {
-						getKeyCount();
-					} catch (Exception e) {
-						e.printStackTrace();
-				}     
-
-
-
+			getKeyCount();
+		} catch (Exception e) {
+			e.printStackTrace();
+		}     
             }
 
         }
